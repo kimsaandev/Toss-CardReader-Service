@@ -16,6 +16,7 @@ import java.io.IOException
 object SpLink {
     private const val DEVICE = "/dev/ttyS3"
     private const val BAUD = "921600"
+    private const val STTY = "/system/bin/stty"
     private const val PROBE_TIMEOUT_MS = 1000L
     private const val HEADER_TIMEOUT_MS = 300L
     private const val QUIET_MS = 300L
@@ -82,11 +83,20 @@ object SpLink {
     private fun ByteArray.hex() = joinToString("") { "%02X".format(it.toInt() and 0xFF) }
 
     private fun configure() {
-        val p = ProcessBuilder(
-            "/system/bin/stty", "-F", DEVICE, BAUD, "raw", "cs8", "-parenb", "-cstopb", "-crtscts",
-            "clocal", "cread", "-echo", "min", "0", "time", "0",
-        ).redirectErrorStream(true).start()
+        runStty(BAUD, "cs8", "-parenb", "-cstopb", "-crtscts", "clocal", "cread", "min", "0", "time", "0")
+        val current = runStty("-g")
+        if (!current.matches(Regex("[0-9a-fA-F]+(?::[0-9a-fA-F]+){4,}"))) throw IOException("invalid serial settings")
+        val fields = current.split(':', limit = 5)
+        // Some Android stty builds set input flags when applying "raw" or individual control options.
+        // Write the serialized raw mode last, preserving the configured control flags and characters.
+        runStty("0:0:${fields[2]}:0:${fields[4]}")
+    }
+
+    private fun runStty(vararg args: String): String {
+        val p = ProcessBuilder(STTY, "-F", DEVICE, *args).redirectErrorStream(true).start()
+        val output = p.inputStream.bufferedReader().use { it.readText().trim() }
         if (p.waitFor() != 0) throw IOException("stty failed")
+        return output
     }
 
     private fun readFrame(f: FileDescriptor, timeoutMs: Long): ByteArray {
