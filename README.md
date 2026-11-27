@@ -6,11 +6,19 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 서비스 버전 | 1.0.2 (versionCode 3) |
+| 서비스 버전 | 1.0.2-uart.1 (versionCode 4) |
 | 패키지 | `com.toss.cardreader.service` |
-| 대상 환경 | 토스프론트 PLF02WH / LineageOS 13 |
-| 배포 파일 | `toss-cardreader-service-1.0.2.apk` (GitHub Releases) |
+| 실기기 검증 환경 | 토스프론트 1.5 (PLF02WH) / LineageOS 18.1 (Android 11) / 커널 `4.19.193-ab761` |
+| 빌드 APK | `service/build/outputs/apk/release/service-release.apk` |
 | 첫 클라이언트 | 카드 리더 앱 1.3.0 이상 ([AkaKSR/Toss-CardReader](https://github.com/AkaKSR/Toss-CardReader)) |
+
+## LineageOS 18.1에서 UART를 수정한 이유
+
+PLF02WH에 설치한 LineageOS 빌드(`18.1-20240121-UNOFFICIAL-arm64_bvS`)에서 `stty raw`를 실행하면 UART 입력 변환 플래그가 켜졌습니다. 그 결과 서비스가 읽은 리더의 연결 응답이 정상값 `0x41`(대문자 A)에서 `0x61`(소문자 a)로 바뀌며 연결이 실패했습니다. `IUCLC`와 `IEXTEN`이 함께 켜지면 Linux의 터미널 입력 처리가 대문자를 소문자로 변환합니다. [Linux 4.19 입력 처리 코드](https://github.com/torvalds/linux/blob/v4.19/drivers/tty/n_tty.c#L1463-L1471)
+
+`1.0.2-uart.1`은 서비스가 `/dev/ttyS3`를 열 때마다 921600 baud·8N1로 설정한 뒤 입력·출력·로컬 처리 플래그를 0으로 설정합니다. 수정 범위는 서비스의 UART 초기화이며, 서비스 APK만 교체해 적용했습니다.
+
+실제 재부팅 후 서비스 자동 시작, UART 연결, IC 슬롯의 카드 감지, 칩 초기 응답(ATR), APDU 교환을 확인했습니다.
 
 ## 왜 별도 서비스인가
 
@@ -30,20 +38,20 @@
 
 | 버전 | 날짜 | 변경 요약 |
 | --- | --- | --- |
+| 1.0.2-uart.1 (versionCode 4) | 2026-11-27 | LineageOS 18.1 실기기에서 UART 입력 변환으로 인한 카드 리더 연결 오류를 수정했습니다. |
 | 1.0.2 (versionCode 3) | 2026-11-23 | 첫 클라이언트가 나갈 때만이 아니라 마지막 클라이언트가 나갈 때마다 리더를 닫습니다(`onUnbind`가 `true`를 돌려주고 `onRebind` 추가). 다시 연결한 뒤 두 번째로 닫는 과정을 실기기에서 확인했습니다. |
 | 1.0.1 (versionCode 2) | 2026-11-23 | 리더 링크를 다시 열면 프레임 번호를 00부터 다시 셉니다. |
 | 1.0.0 (versionCode 1) | 2026-11-23 | 첫 버전: AIDL 서비스, 서명 인증서 허용 목록, 연결 라이브러리, 시험 앱 |
 
-부팅 직후 자동 시작(`BOOT_COMPLETED`)은 아직 실기기 재부팅으로 확인하지 않았습니다.
-
 ## 설치
 
 ```sh
-adb install -r toss-cardreader-service-1.0.2.apk
+./gradlew :service:assembleRelease
+adb install -r service/build/outputs/apk/release/service-release.apk
 adb shell am start-foreground-service -n com.toss.cardreader.service/.ReaderService
 ```
 
-서비스는 부팅과 업데이트 때 스스로 시작합니다. 실행 중에는 최소 우선순위 알림이 표시됩니다. 같은 서명 키로 만든 1.0.0·1.0.1 위에 덮어 설치할 수 있습니다.
+서비스는 첫 실행 이후 부팅과 업데이트 때 스스로 시작합니다. 실행 중에는 최소 우선순위 알림이 표시됩니다. 기존 서비스와 같은 서명 키로 빌드한 경우 덮어 설치할 수 있습니다. 원본 배포 APK와 포크 APK의 서명 키가 다르면 기존 서비스 APK를 백업한 뒤 교체 설치해야 합니다.
 
 ## 모듈과 빌드
 
